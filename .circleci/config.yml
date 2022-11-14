@@ -1,0 +1,115 @@
+version: 2.1
+
+orbs:
+  docker: circleci/docker@2.1.2
+
+jobs:
+  lint-build:
+    docker:
+      - image: python:3.7.3-stretch
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "requirements.txt" }}
+            - v1-dependencies-
+      - run:
+          name: install application dependencies
+          command: |
+            python3 -m venv devops
+            . devops/bin/activate
+            make install
+      - run:
+          name: lint application code
+          command: |
+            . devops/bin/activate
+            make lint
+      - save_cache:
+          paths:
+            - ./devops
+          key: v1-dependencies-{{ checksum "requirements.txt" }}
+
+  build-upload-docker:
+    docker:
+      - image: circleci/golang:1.15
+
+    working_directory: ~/repo
+
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: 19.03.13
+      - run:
+          name: Build docker image 
+          command: |
+            docker build --tag=$DOCKER_IMAGE_NAME .
+            docker image ls
+            docker run -p 80:80 $DOCKER_IMAGE_NAME
+      - run:
+          name: Upload image to Dockerhub
+          command: |
+            echo "Uploading docker Image: $DOCKER_IMAGE_NAME"
+            docker login -u="$DOCKERHUB_USERNAME" -p="$DOCKERHUB_PASSWORD"
+            echo "Docker login successfull"
+            docker tag $DOCKER_IMAGE_NAME $DOCKERHUB_USERNAME/$DOCKER_IMAGE_NAME
+            echo "Tagged docker image"
+            docker push $DOCKERHUB_USERNAME/$DOCKER_IMAGE_NAME
+            echo "Image Uploaded successfully!!!"
+
+  create-deploy-to-cluster:
+    docker:
+      - image: cimg/base:2022.06
+    
+    working_directory: ~/repo
+
+    steps:
+      - checkout
+      - run:
+          name: Install and upgrade apt-get
+          command: sudo apt-get update && sudo apt-get upgrade
+      - run:
+          name: Install AWS CLI
+          command: |
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install
+            aws --version
+      - run:
+          name: Install Kubectl
+          command: |
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+            kubectl version --short --client
+      - run:
+          name: Install eksctl
+          command: |
+            curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" | tar xz -C /tmp
+            sudo mv /tmp/eksctl /usr/local/bin
+            eksctl version
+      - run:
+          name: Create Kubernetes cluster
+          command: |
+            export TERM=xterm
+            aws configure set default.region $AWS_DEFAULT_REGION
+            aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+            aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+            aws cloudformation list-exports > deploymentStatus.txt
+            cd scripts
+            chmod 755 create-infra.sh
+            ./create-infra.sh
+      - run:
+          name: Deploy image to cluster
+          command: |
+            kubectl get nodes
+            kubectl create deploy $DOCKER_IMAGE_NAME --image=$DOCKERHUB_USERNAME/$DOCKER_IMAGE_NAME:latest
+            kubectl get deploy,rs,svc,pods  
+workflows:
+  default:
+    jobs:
+    - lint-build
+    - build-upload-docker:
+        requires:
+          - lint-build
+    - create-deploy-to-cluster:
+        requires:
+          - build-upload-docker
