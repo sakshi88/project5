@@ -105,6 +105,8 @@ jobs:
             kubectl get deploy,rs,svc,pods  
             podName=$(kubectl get pods)
             echo "${podName}"
+            echo "Wait 120 seconds..."
+            sleep 120
             kubectl port-forward pod/$podName --address 0.0.0.0 80:80
 workflows:
   default:
