@@ -44,7 +44,7 @@ jobs:
           command: |
             docker build --tag=$DOCKER_IMAGE_NAME .
             docker image ls
-            docker run -p 80:80 $DOCKER_IMAGE_NAME
+            docker run -p 80:80 $DOCKER_IMAGE_NAME &
       - run:
           name: Upload image to Dockerhub
           command: |
