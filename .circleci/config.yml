@@ -103,11 +103,12 @@ jobs:
             kubectl get nodes
             kubectl create deploy $DOCKER_IMAGE_NAME --image=$DOCKERHUB_USERNAME/$DOCKER_IMAGE_NAME:latest --port 80
             kubectl get deploy,rs,svc,pods  
-            podName=$(kubectl get pods)
+            podName=$(kubectl get pods -o=name | grep capstone)
             echo "${podName}"
             echo "Wait 120 seconds..."
             sleep 120
-            kubectl port-forward pod/$podName --address 0.0.0.0 80:80
+            kubectl get deploy,rs,svc,pods
+            kubectl port-forward $podName --address 0.0.0.0 80:80
 workflows:
   default:
     jobs:
